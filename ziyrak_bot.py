@@ -1,13 +1,11 @@
 import os
-import json
 import requests
 from flask import Flask, request
 
 app = Flask(__name__)
 
-# Environment variables dan olinadi
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 SYSTEM_PROMPT = """Sen "Ziyrak" nomli o'zbek tilidagi sun'iy intellektsan. 
 Foydalanuvchi bilan faqat o'zbek tilida suhbatlash. 
@@ -17,32 +15,33 @@ def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": chat_id, "text": text})
 
-def ask_claude(user_message):
+def ask_groq(user_message):
     response = requests.post(
-        "https://api.anthropic.com/v1/messages",
+        "https://api.groq.com/openai/v1/chat/completions",
         headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
         },
         json={
-            "model": "claude-haiku-4-5-20251001",
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
             "max_tokens": 1000,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_message}],
         },
     )
     data = response.json()
-    return data["content"][0]["text"]
+    return data["choices"][0]["message"]["content"]
 
-@app.route(f"/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.json
     if "message" in update:
         chat_id = update["message"]["chat"]["id"]
         text = update["message"].get("text", "")
         if text:
-            reply = ask_claude(text)
+            reply = ask_groq(text)
             send_message(chat_id, reply)
     return "ok"
 
@@ -53,3 +52,4 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+    
