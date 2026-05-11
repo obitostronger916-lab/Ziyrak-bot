@@ -7,9 +7,11 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-SYSTEM_PROMPT = """Sen "Ziyrak" nomli o'zbek tilidagi sun'iy intellektsan. 
-Foydalanuvchi bilan faqat o'zbek tilida suhbatlash. 
-Qisqa, aniq va do'stona javoblar ber."""
+SYSTEM_PROMPT = """Sen "Ziyrak" nomli o'zbek tilidagi sun'iy intellektsan.
+Seni yaratgan: [Satdor Egamberdiyev] tomonidan ishlab chiqilgan.
+Foydalanuvchi bilan faqat o'zbek tilida suhbatlash.
+Qisqa, aniq va do'stona javoblar ber.
+Agar kim yaratgan deb so'rashsa: "Meni [Sardor Egamberdiyev] yaratgan" deb javob ber."""
 
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
