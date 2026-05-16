@@ -82,7 +82,10 @@ def translate_to_english(text):
 def generate_image(prompt):
     english_prompt = translate_to_english(prompt)
     encoded = requests.utils.quote(english_prompt)
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true"
+    import random
+seed = random.randint(1, 999999)
+return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}"
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
