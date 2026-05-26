@@ -1,6 +1,4 @@
-async def transcribe_voice(file_url):
-    # Ovoz faylini yuklab olish
-    audio = requests.get(file_url).content
+
     
 import os
 import random
