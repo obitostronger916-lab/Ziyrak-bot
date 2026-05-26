@@ -2,14 +2,7 @@ async def transcribe_voice(file_url):
     # Ovoz faylini yuklab olish
     audio = requests.get(file_url).content
     
-    # Groq Whisper orqali matnга o'girish
-    response = requests.post(
-        "https://api.groq.com/openai/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        files={"file": ("voice.ogg", audio, "audio/ogg")},
-        data={"model": "whisper-large-v3-turbo"}
-    )
-    return response.json()["text"]import os
+import os
 import random
 import requests
 from flask import Flask, request
