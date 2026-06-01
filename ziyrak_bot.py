@@ -7,16 +7,16 @@ from flask import Flask, request
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 SYSTEM_PROMPT = """Sen "Ziyrak" nomli o'zbek tilidagi sun'iy intellektsan.
 Seni iste'dodli o'zbek dasturchisi yaratgan.
 Foydalanuvchi bilan faqat o'zbek tilida suhbatlash.
 Qisqa, aniq va do'stona javoblar ber.
 Agar kim yaratgan deb so'rashsa: "Meni iste'dodli o'zbek dasturchisi yaratgan" deb javob ber.
-Agar qaysi AI, qaysi model, Gemini, GPT, Claude yoki texnologiya haqida so'rashsa:
+Agar qaysi AI, qaysi model yoki texnologiya haqida so'rashsa:
 "Men Ziyrak AI — o'zbek dasturchilari tomonidan yaratilgan maxsus sun'iy intellektman" deb javob ber.
-Hech qachon Gemini, Google, OpenAI, Anthropic yoki boshqa kompaniya nomini tilga olma."""
+Hech qachon boshqa AI kompaniyalar nomini tilga olma."""
 
 conversations = {}
 MAX_HISTORY = 20
@@ -55,56 +55,66 @@ def clear_history(chat_id):
     conversations[chat_id] = []
 
 
-def gemini_call(contents, system=True):
-    """Gemini API ga so'rov yuborish"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": contents, "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.7}}
-    if system:
-        payload["system_instruction"] = {"parts": [{"text": SYSTEM_PROMPT}]}
-    try:
-        r = requests.post(url, json=payload, timeout=30)
-        d = r.json()
-        if "candidates" in d and d["candidates"]:
-            return d["candidates"][0]["content"]["parts"][0]["text"]
-        elif "error" in d:
-            return "Vaqtinchalik xatolik. Qayta urinib ko'ring."
-        return "Javob olishda xatolik."
-    except Exception:
-        return "Tarmoq xatosi. Qayta urinib ko'ring."
-
-
-def ask_gemini(chat_id, user_message):
+def ask_groq(chat_id, user_message):
     history = get_history(chat_id)
-    contents = []
-    for msg in history:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
-    contents.append({"role": "user", "parts": [{"text": user_message}]})
-    return gemini_call(contents)
+    messages = history + [{"role": "user", "content": user_message}]
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages, "max_tokens": 1000},
+            timeout=30
+        )
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception:
+        return "Vaqtinchalik xatolik. Qayta urinib ko'ring."
 
-
-def ask_gemini_with_image(chat_id, image_url, caption):
+def ask_groq_with_image(chat_id, image_url, caption):
     question = caption if caption else "Bu rasmda nima ko'rinyapti? O'zbek tilida tushuntir."
     try:
         img_data = requests.get(image_url, timeout=15).content
         img_b64 = base64.b64encode(img_data).decode()
-        contents = [{"role": "user", "parts": [
-            {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
-            {"text": question}
-        ]}]
-        return gemini_call(contents)
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.2-90b-vision-preview",
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                        {"type": "text", "text": question}
+                    ]}
+                ],
+                "max_tokens": 1000
+            },
+            timeout=30
+        )
+        d = r.json()
+        if "choices" in d:
+            return d["choices"][0]["message"]["content"]
+        return ask_groq(chat_id, question)
     except Exception:
-        return ask_gemini(chat_id, question)
-
+        return ask_groq(chat_id, question)
 
 def translate_to_english(text):
-    contents = [{"role": "user", "parts": [{"text": f"Translate to English. Return ONLY the translation: {text}"}]}]
-    return gemini_call(contents, system=False)
-
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile", "messages": [
+                {"role": "system", "content": "Translate to English. Return ONLY the translation."},
+                {"role": "user", "content": text}
+            ], "max_tokens": 200},
+            timeout=15
+        )
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception:
+        return text
 
 def generate_image(prompt):
-    english_prompt = translate_to_english(prompt)
-    encoded = requests.utils.quote(english_prompt)
+    english = translate_to_english(prompt)
+    encoded = requests.utils.quote(english)
     seed = random.randint(1, 999999)
     return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}"
 
@@ -120,27 +130,24 @@ def webhook():
     text = message.get("text", "").strip()
     caption = message.get("caption", "").strip()
 
-    # Rasm
     if "photo" in message:
         send_typing(chat_id)
-        photo = message["photo"][-1]
-        file_url = get_file_url(photo["file_id"])
-        reply = ask_gemini_with_image(chat_id, file_url, caption) if file_url else "Rasmni yuklab bo'lmadi."
+        file_url = get_file_url(message["photo"][-1]["file_id"])
+        reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Rasmni yuklab bo'lmadi."
         add_to_history(chat_id, "user", f"[Rasm] {caption}" if caption else "[Rasm]")
         add_to_history(chat_id, "assistant", reply)
         send_message(chat_id, reply)
         return "ok"
 
-    # Fayl
     if "document" in message:
         send_typing(chat_id)
         doc = message["document"]
         name = doc.get("file_name", "fayl")
         if doc.get("mime_type", "").startswith("image/"):
             file_url = get_file_url(doc["file_id"])
-            reply = ask_gemini_with_image(chat_id, file_url, caption) if file_url else "Faylni yuklab bo'lmadi."
+            reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Faylni yuklab bo'lmadi."
         else:
-            reply = ask_gemini(chat_id, caption if caption else f"'{name}' fayl yuborildi.")
+            reply = ask_groq(chat_id, caption if caption else f"'{name}' fayl yuborildi.")
         add_to_history(chat_id, "user", f"[Fayl: {name}]")
         add_to_history(chat_id, "assistant", reply)
         send_message(chat_id, reply)
@@ -181,12 +188,11 @@ def webhook():
             return "ok"
         send_typing(chat_id)
         send_message(chat_id, "🎨 Rasm yaratilmoqda... ⏳")
-        image_url = generate_image(prompt)
-        send_photo(chat_id, image_url, f"🎨 {prompt}")
+        send_photo(chat_id, generate_image(prompt), f"🎨 {prompt}")
         return "ok"
 
     send_typing(chat_id)
-    reply = ask_gemini(chat_id, text)
+    reply = ask_groq(chat_id, text)
     add_to_history(chat_id, "user", text)
     add_to_history(chat_id, "assistant", reply)
     send_message(chat_id, reply)
