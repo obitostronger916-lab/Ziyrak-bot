@@ -208,7 +208,7 @@ def webhook():
         clear_history(chat_id)
         send_message(chat_id,
             "🤖 <b>Ziyrak AI</b> ga xush kelibsiz!\n\n"
-            "⚡ Endi Google Gemini bilan ishlayapman!\n\n"
+        
             "💬 Har qanday savol — shunchaki yozing\n"
             "🖼 Rasm yuboring — tahlil qilaman\n"
             "🎨 Rasm yaratish — <b>/rasm [tavsif]</b>\n"
