@@ -14,9 +14,8 @@ Seni iste'dodli o'zbek dasturchisi yaratgan.
 Foydalanuvchi bilan faqat o'zbek tilida suhbatlash.
 Qisqa, aniq va do'stona javoblar ber.
 Agar kim yaratgan deb so'rashsa: "Meni iste'dodli o'zbek dasturchisi yaratgan" deb javob ber.
-Agar qaysi AI, qaysi model yoki texnologiya haqida so'rashsa:
-"Men Ziyrak AI — o'zbek dasturchilari tomonidan yaratilgan maxsus sun'iy intellektman" deb javob ber.
-Hech qachon boshqa AI kompaniyalar nomini tilga olma."""
+Agar qaysi AI yoki texnologiya haqida so'rashsa:
+"Men Ziyrak AI — o'zbek dasturchilari tomonidan yaratilgan maxsus sun'iy intellektman" deb javob ber."""
 
 conversations = {}
 MAX_HISTORY = 20
@@ -62,7 +61,11 @@ def ask_groq(chat_id, user_message):
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages, "max_tokens": 1000},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+                "max_tokens": 1000
+            },
             timeout=30
         )
         return r.json()["choices"][0]["message"]["content"]
@@ -102,10 +105,14 @@ def translate_to_english(text):
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "messages": [
-                {"role": "system", "content": "Translate to English. Return ONLY the translation."},
-                {"role": "user", "content": text}
-            ], "max_tokens": 200},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": "Translate to English. Return ONLY the translation."},
+                    {"role": "user", "content": text}
+                ],
+                "max_tokens": 200
+            },
             timeout=15
         )
         return r.json()["choices"][0]["message"]["content"]
@@ -118,27 +125,23 @@ def generate_image(prompt):
     seed = random.randint(1, 999999)
     return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}"
 
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    update = request.json
-    if "message" not in update:
-        return "ok"
-
-    message = update["message"]
+def handle_message(message):
+    """Xabarni qayta ishlash — oddiy va business xabarlar uchun"""
     chat_id = message["chat"]["id"]
     text = message.get("text", "").strip()
     caption = message.get("caption", "").strip()
 
+    # Rasm
     if "photo" in message:
         send_typing(chat_id)
         file_url = get_file_url(message["photo"][-1]["file_id"])
         reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Rasmni yuklab bo'lmadi."
-        add_to_history(chat_id, "user", f"[Rasm] {caption}" if caption else "[Rasm]")
+        add_to_history(chat_id, "user", "[Rasm]")
         add_to_history(chat_id, "assistant", reply)
         send_message(chat_id, reply)
-        return "ok"
+        return
 
+    # Fayl
     if "document" in message:
         send_typing(chat_id)
         doc = message["document"]
@@ -151,10 +154,10 @@ def webhook():
         add_to_history(chat_id, "user", f"[Fayl: {name}]")
         add_to_history(chat_id, "assistant", reply)
         send_message(chat_id, reply)
-        return "ok"
+        return
 
     if not text:
-        return "ok"
+        return
 
     if text == "/start":
         clear_history(chat_id)
@@ -165,12 +168,12 @@ def webhook():
             "🎨 Rasm yaratish — <b>/rasm [tavsif]</b>\n"
             "🔄 Suhbatni tozalash — <b>/yangi</b>\n\n"
             "✅ Men oldingi suhbatni eslab qolaman!")
-        return "ok"
+        return
 
     if text == "/yangi":
         clear_history(chat_id)
-        send_message(chat_id, "🔄 Suhbat tozalandi! Yangi suhbat boshlang.")
-        return "ok"
+        send_message(chat_id, "🔄 Suhbat tozalandi!")
+        return
 
     if text == "/help":
         send_message(chat_id,
@@ -179,23 +182,38 @@ def webhook():
             "🔹 Rasm yuboring — tahlil qilaman\n"
             "🔹 /rasm [tavsif] — rasm yaratish\n"
             "🔹 /yangi — suhbatni tozalash")
-        return "ok"
+        return
 
     if text.startswith("/rasm"):
         prompt = text.replace("/rasm", "").strip()
         if not prompt:
             send_message(chat_id, "❗ Misol: /rasm tog'lar orasida uy")
-            return "ok"
+            return
         send_typing(chat_id)
         send_message(chat_id, "🎨 Rasm yaratilmoqda... ⏳")
         send_photo(chat_id, generate_image(prompt), f"🎨 {prompt}")
-        return "ok"
+        return
 
+    # Oddiy suhbat
     send_typing(chat_id)
     reply = ask_groq(chat_id, text)
     add_to_history(chat_id, "user", text)
     add_to_history(chat_id, "assistant", reply)
     send_message(chat_id, reply)
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    update = request.json
+
+    # Oddiy xabar
+    if "message" in update:
+        handle_message(update["message"])
+
+    # Telegram Business xabari
+    if "business_message" in update:
+        handle_message(update["business_message"])
+
     return "ok"
 
 
@@ -207,4 +225,4 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-        
+    
