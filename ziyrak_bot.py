@@ -123,7 +123,7 @@ def generate_image(prompt):
     english = translate_to_english(prompt)
     encoded = requests.utils.quote(english)
     seed = random.randint(1, 999999)
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}&model=nanobanana-pro"
+    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}&model=flux
 
 def handle_message(message):
     """Xabarni qayta ishlash — oddiy va business xabarlar uchun"""
