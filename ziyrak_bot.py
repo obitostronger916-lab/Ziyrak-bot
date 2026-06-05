@@ -10,24 +10,33 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 SYSTEM_PROMPT = """Sen "Ziyrak" nomli o'zbek tilidagi sun'iy intellektsan.
-Seni iste'dodli o'zbek dasturchisi yaratgan.
+Seni Inferiq jamoasi yaratgan.
 Foydalanuvchi bilan faqat o'zbek tilida suhbatlash.
 Qisqa, aniq va do'stona javoblar ber.
-Agar kim yaratgan deb so'rashsa: "Meni iste'dodli o'zbek dasturchisi yaratgan" deb javob ber.
+Agar kim yaratgan deb so'rashsa: "Meni Inferiq jamoasi yaratgan" deb javob ber.
 Agar qaysi AI yoki texnologiya haqida so'rashsa:
-"Men Ziyrak AI — o'zbek dasturchilari tomonidan yaratilgan maxsus sun'iy intellektman" deb javob ber."""
+"Men Ziyrak AI — Inferiq jamoasi tomonidan yaratilgan maxsus sun'iy intellektman" deb javob ber.
+Hech qachon boshqa AI kompaniyalar nomini tilga olma."""
 
 conversations = {}
+waiting_for_image = {}
 MAX_HISTORY = 20
 
 
-def send_message(chat_id, text):
+def send_message(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        data["reply_markup"] = reply_markup
+    requests.post(url, json=data)
 
 def send_typing(chat_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendChatAction"
     requests.post(url, json={"chat_id": chat_id, "action": "typing"})
+
+def send_upload_photo(chat_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendChatAction"
+    requests.post(url, json={"chat_id": chat_id, "action": "upload_photo"})
 
 def send_photo(chat_id, photo_url, caption=""):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -62,7 +71,7 @@ def ask_groq(chat_id, user_message):
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": "qwen-qwq-32b",
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
                 "max_tokens": 1000
             },
@@ -106,7 +115,7 @@ def translate_to_english(text):
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": "qwen-qwq-32b",
                 "messages": [
                     {"role": "system", "content": "Translate to English. Return ONLY the translation."},
                     {"role": "user", "content": text}
@@ -124,103 +133,145 @@ def generate_image(prompt):
     encoded = requests.utils.quote(english)
     seed = random.randint(1, 999999)
     return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}"
-    
 
-def handle_message(message):
-    """Xabarni qayta ishlash — oddiy va business xabarlar uchun"""
-    chat_id = message["chat"]["id"]
-    text = message.get("text", "").strip()
-    caption = message.get("caption", "").strip()
-
-    # Rasm
-    if "photo" in message:
-        send_typing(chat_id)
-        file_url = get_file_url(message["photo"][-1]["file_id"])
-        reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Rasmni yuklab bo'lmadi."
-        add_to_history(chat_id, "user", "[Rasm]")
-        add_to_history(chat_id, "assistant", reply)
-        send_message(chat_id, reply)
-        return
-
-    # Fayl
-    if "document" in message:
-        send_typing(chat_id)
-        doc = message["document"]
-        name = doc.get("file_name", "fayl")
-        if doc.get("mime_type", "").startswith("image/"):
-            file_url = get_file_url(doc["file_id"])
-            reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Faylni yuklab bo'lmadi."
-        else:
-            reply = ask_groq(chat_id, caption if caption else f"'{name}' fayl yuborildi.")
-        add_to_history(chat_id, "user", f"[Fayl: {name}]")
-        add_to_history(chat_id, "assistant", reply)
-        send_message(chat_id, reply)
-        return
-
-    if not text:
-        return
-
-    if text == "/start":
-        clear_history(chat_id)
-        send_message(chat_id,
-            "🤖 <b>Ziyrak AI</b> ga xush kelibsiz!\n\n"
-            "💬 Har qanday savol — shunchaki yozing\n"
-            "🖼 Rasm yuboring — tahlil qilaman\n"
-            "🎨 Rasm yaratish — <b>/rasm [tavsif]</b>\n"
-            "🔄 Suhbatni tozalash — <b>/yangi</b>\n\n"
-            "✅ Men oldingi suhbatni eslab qolaman!")
-        return
-
-    if text == "/yangi":
-        clear_history(chat_id)
-        send_message(chat_id, "🔄 Suhbat tozalandi!")
-        return
-
-    if text == "/help":
-        send_message(chat_id,
-            "📖 <b>Ziyrak AI — Yordam</b>\n\n"
-            "🔹 Savol yozing — javob beraman\n"
-            "🔹 Rasm yuboring — tahlil qilaman\n"
-            "🔹 /rasm [tavsif] — rasm yaratish\n"
-            "🔹 /yangi — suhbatni tozalash")
-        return
-
-    if text.startswith("/rasm"):
-        prompt = text.replace("/rasm", "").strip()
-        if not prompt:
-            send_message(chat_id, "❗ Misol: /rasm tog'lar orasida uy")
-            return
-        send_typing(chat_id)
-        send_message(chat_id, "🎨 Rasm yaratilmoqda... ⏳")
-        send_photo(chat_id, generate_image(prompt), f"🎨 {prompt}")
-        return
-
-    # Oddiy suhbat
-    send_typing(chat_id)
-    reply = ask_groq(chat_id, text)
-    add_to_history(chat_id, "user", text)
-    add_to_history(chat_id, "assistant", reply)
-    send_message(chat_id, reply)
+def main_menu():
+    return {
+        "keyboard": [
+            [{"text": "🎨 Rasm yaratish"}, {"text": "🔄 Yangi suhbat"}],
+            [{"text": "❓ Yordam"}]
+        ],
+        "resize_keyboard": True
+    }
 
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.json
 
-    # Oddiy xabar
     if "message" in update:
-        handle_message(update["message"])
+        message = update["message"]
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "").strip()
+        caption = message.get("caption", "").strip()
 
-    # Telegram Business xabari
+        # Rasm yuborilsa
+        if "photo" in message:
+            send_typing(chat_id)
+            file_url = get_file_url(message["photo"][-1]["file_id"])
+            reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Rasmni yuklab bo'lmadi."
+            add_to_history(chat_id, "user", "[Rasm]")
+            add_to_history(chat_id, "assistant", reply)
+            send_message(chat_id, reply, reply_markup=main_menu())
+            waiting_for_image[chat_id] = False
+            return "ok"
+
+        # Fayl yuborilsa
+        if "document" in message:
+            send_typing(chat_id)
+            doc = message["document"]
+            name = doc.get("file_name", "fayl")
+            if doc.get("mime_type", "").startswith("image/"):
+                file_url = get_file_url(doc["file_id"])
+                reply = ask_groq_with_image(chat_id, file_url, caption) if file_url else "Faylni yuklab bo'lmadi."
+            else:
+                reply = ask_groq(chat_id, caption if caption else f"'{name}' fayl yuborildi.")
+            add_to_history(chat_id, "user", f"[Fayl: {name}]")
+            add_to_history(chat_id, "assistant", reply)
+            send_message(chat_id, reply, reply_markup=main_menu())
+            return "ok"
+
+        if not text:
+            return "ok"
+
+        # /start
+        if text == "/start":
+            clear_history(chat_id)
+            waiting_for_image[chat_id] = False
+            send_message(chat_id,
+                "🤖 <b>Ziyrak AI</b> ga xush kelibsiz!\n\n"
+                "💬 Har qanday savol yozing — javob beraman\n"
+                "🖼 Rasm yuboring — tahlil qilaman\n"
+                "🎨 Rasm yaratish tugmasini bosing\n\n"
+                "✅ Men oldingi suhbatni eslab qolaman!\n\n"
+                "<i>Inferiq jamoasi tomonidan yaratilgan</i>",
+                reply_markup=main_menu()
+            )
+            return "ok"
+
+        # Yangi suhbat
+        if text in ["🔄 Yangi suhbat", "/yangi"]:
+            clear_history(chat_id)
+            waiting_for_image[chat_id] = False
+            send_message(chat_id, "🔄 Suhbat tozalandi! Yangi suhbat boshlang.", reply_markup=main_menu())
+            return "ok"
+
+        # Yordam
+        if text in ["❓ Yordam", "/help"]:
+            waiting_for_image[chat_id] = False
+            send_message(chat_id,
+                "📖 <b>Ziyrak AI — Yordam</b>\n\n"
+                "🔹 Savol yozing — javob beraman\n"
+                "🔹 Rasm yuboring — tahlil qilaman\n"
+                "🔹 🎨 Rasm yaratish — tugmani bosing\n"
+                "🔹 🔄 Yangi suhbat — tarixni tozalash\n\n"
+                "<i>Inferiq jamoasi tomonidan yaratilgan</i>",
+                reply_markup=main_menu()
+            )
+            return "ok"
+
+        # Rasm yaratish tugmasi
+        if text in ["🎨 Rasm yaratish", "/rasm"]:
+            waiting_for_image[chat_id] = True
+            send_message(chat_id,
+                "🎨 <b>Rasm yaratish</b>\n\n"
+                "Qanday rasm yaratishni xohlaysiz?\n"
+                "Tavsifini yozing — men yarataman!\n\n"
+                "<i>Misol: tog'lar orasida qo'rg'on, kech kuz</i>",
+                reply_markup={"keyboard": [[{"text": "❌ Bekor qilish"}]], "resize_keyboard": True}
+            )
+            return "ok"
+
+        # Bekor qilish
+        if text == "❌ Bekor qilish":
+            waiting_for_image[chat_id] = False
+            send_message(chat_id, "❌ Bekor qilindi.", reply_markup=main_menu())
+            return "ok"
+
+        # Rasm tavsifi kutilayotgan bo'lsa
+        if waiting_for_image.get(chat_id):
+            waiting_for_image[chat_id] = False
+            send_upload_photo(chat_id)
+            send_message(chat_id, "🎨 Rasm yaratilmoqda... ⏳")
+            image_url = generate_image(text)
+            send_photo(chat_id, image_url, f"🎨 {text}")
+            send_message(chat_id, "✅ Tayyor! Yana rasm yaratmoqchimisiz?", reply_markup=main_menu())
+            return "ok"
+
+        # Oddiy suhbat
+        send_typing(chat_id)
+        reply = ask_groq(chat_id, text)
+        add_to_history(chat_id, "user", text)
+        add_to_history(chat_id, "assistant", reply)
+        send_message(chat_id, reply, reply_markup=main_menu())
+
+    # Business xabarlar
     if "business_message" in update:
-        handle_message(update["business_message"])
+        message = update["business_message"]
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "").strip()
+        if text and not text.startswith("/"):
+            send_typing(chat_id)
+            reply = ask_groq(chat_id, text)
+            add_to_history(chat_id, "user", text)
+            add_to_history(chat_id, "assistant", reply)
+            send_message(chat_id, reply)
 
     return "ok"
 
 
 @app.route("/")
 def index():
-    return "Ziyrak AI ishlamoqda! ✅"
+    return "Ziyrak AI — Inferiq jamoasi ✅"
 
 
 if __name__ == "__main__":
